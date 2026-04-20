@@ -9,7 +9,7 @@ from OpenGL.GL import *
 import numpy as np
 
 from maze_utils import find_middle_tunnel_rows
-
+# Pacman prueba de codigo
 
 class Pacman:
     """Mapa lógico mapa[row, col]; tablero OpenGL view_size×view_size (p. ej. 400).
