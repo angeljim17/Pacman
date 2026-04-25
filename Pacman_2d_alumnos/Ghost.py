@@ -138,13 +138,14 @@ class NavigationGraph:
     def neighbors(self, node):
         return self._neighbors.get(node, [])
 
-    def astar(self, start, goal, avoid_nodes=None, avoid_penalty=0):
+    def astar(self, start, goal, avoid_nodes=None, avoid_penalty=0, forbidden_nodes=None):
         if start is None or goal is None:
             return []
         if start == goal:
             return []
 
         avoid_nodes = set(avoid_nodes or ())
+        forbidden_nodes = set(forbidden_nodes or ())
         open_heap = [(0, start)]
         came_from = {}
         g_score = {start: 0}
@@ -159,6 +160,8 @@ class NavigationGraph:
             seen.add(current)
 
             for neighbor in self.neighbors(current):
+                if neighbor in forbidden_nodes and neighbor != goal:
+                    continue
                 penalty = avoid_penalty if neighbor in avoid_nodes and neighbor != goal else 0
                 tentative = g_score[current] + 1 + penalty
                 if tentative >= g_score.get(neighbor, math.inf):
@@ -169,6 +172,18 @@ class NavigationGraph:
                 heapq.heappush(open_heap, (f_score, neighbor))
 
         return []
+
+    def nodes_in_rect(self, rect):
+        x0, y0, x1, y1 = rect
+        nodes = set()
+        for gy in range(self.grid_rows):
+            for gx in range(self.grid_cols):
+                if not self.walkable[gy, gx]:
+                    continue
+                wx, wy = self.node_to_world((gx, gy))
+                if x0 <= wx <= x1 and y0 <= wy <= y1:
+                    nodes.add((gx, gy))
+        return nodes
 
     def _heuristic(self, a, b):
         dx = abs(a[0] - b[0])
@@ -208,6 +223,7 @@ class Ghost:
         rng=None,
         release_delay_ms=0,
         house_exit_xy=None,
+        house_rect=None,
     ):
         self.MC = mc
         self.XPxToMC = x_mc
@@ -234,20 +250,38 @@ class Ghost:
         self.rng = rng or random.Random()
         exit_xy = house_exit_xy or (self.view_size * 0.5, self.view_size * 0.405)
         self.house_exit_node = self.navigator.nearest_node(*exit_xy)
+        # Una vez fuera, los nodos del interior de la caja están prohibidos
+        self.house_rect = house_rect
+        self.house_nodes = (
+            self.navigator.nodes_in_rect(house_rect) if house_rect is not None else set()
+        )
         self.release_delay_ms = max(0, int(release_delay_ms))
         self.state = "waiting" if self.release_delay_ms > 0 else "exiting"
         if self.current_node == self.house_exit_node:
             self.state = "chasing"
 
+    def _forbidden_nodes(self):
+        if self.state == "chasing":
+            return self.house_nodes
+        return set()
+
     def loadTextures(self, texturas, id):
         self.texturas = texturas
         self.Id = id
 
+    def _filter_house(self, nodes):
+        forbidden = self._forbidden_nodes()
+        if not forbidden:
+            return list(nodes)
+        filtered = [n for n in nodes if n not in forbidden]
+        return filtered or list(nodes)
+
     def _avoid_reverse(self, neighbors):
-        if self.previous_node is None or len(neighbors) <= 1:
-            return neighbors
-        filtered = [node for node in neighbors if node != self.previous_node]
-        return filtered or neighbors
+        nbrs = self._filter_house(neighbors)
+        if self.previous_node is None or len(nbrs) <= 1:
+            return nbrs
+        filtered = [node for node in nbrs if node != self.previous_node]
+        return filtered or nbrs
 
     def _distance_to(self, node, px, py):
         wx, wy = self.navigator.node_to_world(node)
@@ -298,6 +332,7 @@ class Ghost:
             goal,
             avoid_nodes=avoid_nodes,
             avoid_penalty=self.AVOID_PATH_PENALTY,
+            forbidden_nodes=self._forbidden_nodes(),
         )
         if route:
             return route

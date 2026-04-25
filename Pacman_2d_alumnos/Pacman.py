@@ -19,13 +19,30 @@ class Pacman:
     COLLISION_COLOR_THRESHOLD = 16
     _COLLISION_MASKS = None
 
-    def __init__(self, mapa, mc, x_mc, y_mc, view_size=400.0):
+    def __init__(
+        self,
+        mapa,
+        mc,
+        x_mc,
+        y_mc,
+        view_size=400.0,
+        spawn_exclude_rect=None,
+        spawn_min_y=None,
+        forbidden_rect=None,
+    ):
         self.MC = mc
         self.XPxToMC = x_mc
         self.YPxToMC = y_mc
         self.mapa = mapa
         self.map_rows, self.map_cols = mapa.shape
         self.view_size = float(view_size)
+        # (xmin, ymin, xmax, ymax) en coord. OpenGL: no spawear aquí (p. ej. casita de fantasmas)
+        self._spawn_exclude_rect = spawn_exclude_rect
+        # Si se define, el respawn busca primero celdas con py > spawn_min_y (p. ej. bajo la caja)
+        self._spawn_min_y = None if spawn_min_y is None else float(spawn_min_y)
+        # Si se define, Pacman no puede tener su centro dentro de este rectángulo
+        # (p. ej. la casa de los fantasmas), aunque las celdas estén abiertas.
+        self._forbidden_rect = forbidden_rect
         cw = self.view_size / self.map_cols
         ch = self.view_size / self.map_rows
         self._cell = min(cw, ch)
@@ -118,24 +135,116 @@ class Pacman:
         elif self.px > self.view_size + self.SPRITE_HALF:
             self.px = -self.SPRITE_HALF
 
-    def _find_spawn(self):
-        mid_r, mid_c = self.map_rows // 2, self.map_cols // 2
+    def _spawn_in_exclude_rect(self, px, py):
+        if self._spawn_exclude_rect is None:
+            return False
+        x0, y0, x1, y1 = self._spawn_exclude_rect
+        return x0 <= px <= x1 and y0 <= py <= y1
+
+    def _spawn_seed_rc(self):
+        """Elegir la celda más centrada en X (sobre el centro de la caja) en la franja de
+        filas inmediatamente debajo de spawn_min_y. Prioriza centrado horizontal y
+        cercanía al borde superior de la franja (tras el muro inferior de la caja)."""
+        mid_c = self.map_cols // 2
+        if self._spawn_exclude_rect is not None:
+            x0, _, x1, _ = self._spawn_exclude_rect
+            mid_c = int((x0 + x1) * 0.5 * self.map_cols / self.view_size)
+            mid_c = min(max(mid_c, 0), self.map_cols - 1)
+        if self._spawn_min_y is None:
+            return self.map_rows // 2, mid_c
+        # Recolectar todas las celdas walkable que pasen el filtro y elegir la mejor
+        first_valid_r = None
+        best = None
+        best_score = float("inf")
+        rows_after_first = 0
+        SEARCH_ROWS = 24
+        for r in range(self.map_rows):
+            row_py = (r + 0.5) * self.view_size / self.map_rows
+            if row_py <= self._spawn_min_y:
+                continue
+            if first_valid_r is None:
+                first_valid_r = r
+            rows_after_first = r - first_valid_r
+            if rows_after_first > SEARCH_ROWS:
+                break
+            for c in range(self.map_cols):
+                if self.mapa[r, c] != 0:
+                    continue
+                px, py = self._rc_to_gl_center(r, c)
+                if self._spawn_in_exclude_rect(px, py):
+                    continue
+                if not self._walkable(px, py, 0.0):
+                    continue
+                # Penaliza fuertemente lejanía horizontal; pequeña preferencia por filas
+                # cercanas al borde superior cuando el centrado es similar.
+                score = (c - mid_c) * (c - mid_c) * 100 + rows_after_first
+                if score < best_score:
+                    best_score, best = score, (r, c)
+        if best is not None:
+            return best
+        for r in range(self.map_rows):
+            for c in range(self.map_cols):
+                if self.mapa[r, c] != 0:
+                    continue
+                px, py = self._rc_to_gl_center(r, c)
+                if py <= self._spawn_min_y or self._spawn_in_exclude_rect(px, py):
+                    continue
+                if self._walkable(px, py, 0.0):
+                    return r, c
+        return self.map_rows // 2, self.map_cols // 2
+
+    def _iter_spawn_spiral(self, start_r, start_c, require_below, respect_exclude):
         for rad in range(max(self.map_rows, self.map_cols)):
             for dr in range(-rad, rad + 1):
                 for dc in range(-rad, rad + 1):
-                    r, c = mid_r + dr, mid_c + dc
-                    if (
-                        0 <= r < self.map_rows
-                        and 0 <= c < self.map_cols
-                        and self.mapa[r, c] == 0
-                    ):
-                        px, py = self._rc_to_gl_center(r, c)
-                        if self._walkable(px, py, 0.0):
-                            return px, py
+                    r, c = start_r + dr, start_c + dc
+                    if not (0 <= r < self.map_rows and 0 <= c < self.map_cols):
+                        continue
+                    if self.mapa[r, c] != 0:
+                        continue
+                    px, py = self._rc_to_gl_center(r, c)
+                    if respect_exclude and self._spawn_in_exclude_rect(px, py):
+                        continue
+                    if require_below and self._spawn_min_y is not None and py <= self._spawn_min_y:
+                        continue
+                    if self._walkable(px, py, 0.0):
+                        yield px, py
+
+    def _find_spawn(self):
+        need_below = self._spawn_min_y is not None
+        seed_r, seed_c = self._spawn_seed_rc()
+        for px, py in self._iter_spawn_spiral(
+            seed_r, seed_c, require_below=need_below, respect_exclude=True
+        ):
+            return px, py
+        for px, py in self._iter_spawn_spiral(
+            self.map_rows // 2, self.map_cols // 2, require_below=need_below, respect_exclude=True
+        ):
+            return px, py
+        for px, py in self._iter_spawn_spiral(
+            self.map_rows // 2, self.map_cols // 2, require_below=False, respect_exclude=True
+        ):
+            return px, py
+        for px, py in self._iter_spawn_spiral(
+            self.map_rows // 2, self.map_cols // 2, require_below=False, respect_exclude=False
+        ):
+            return px, py
         vs = self.view_size
         return vs * 0.5, vs * 0.5
 
+    def reset_spawn(self):
+        """Para respawn o nueva vida: vuelve a buscar posición (respeta la exclusión)."""
+        self.px, self.py = self._find_spawn()
+
+    def _in_forbidden_rect(self, px, py):
+        if self._forbidden_rect is None:
+            return False
+        x0, y0, x1, y1 = self._forbidden_rect
+        return x0 <= px <= x1 and y0 <= py <= y1
+
     def _walkable(self, px, py, angle=None):
+        if self._in_forbidden_rect(px, py):
+            return False
         for ox, oy in self._collision_points(angle):
             if not self._pixel_walkable(px + ox, py + oy):
                 return False

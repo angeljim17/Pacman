@@ -86,14 +86,35 @@ YPxToMC[360] = 9
 path = []
 grid = []
 
-pc = Pacman(matrix, MC, XPxToMC, YPxToMC, view_size=float(DimBoard))
+# Caja interna de fantasmas (zona walkable detectada por el grafo: x∈[166,234], y∈[162,194]).
+# Le añadimos algo de margen para que también queden bloqueados los nodos limítrofes.
+ghost_house_rect = (160.0, 158.0, 240.0, 198.0)
+
+# Pacman no debe spawnear dentro de la caja. El corte va por debajo del muro inferior real
+# de la caja (~y=209) más medio sprite, para que el cuerpo del Pacman no toque ese muro.
+pacman_spawn_exclude = ghost_house_rect
+_pacman_spawn_min_y = 210.0
+
+pc = Pacman(
+    matrix,
+    MC,
+    XPxToMC,
+    YPxToMC,
+    view_size=float(DimBoard),
+    spawn_exclude_rect=pacman_spawn_exclude,
+    spawn_min_y=_pacman_spawn_min_y,
+    forbidden_rect=ghost_house_rect,
+)
 ghost_nav = NavigationGraph(matrix, view_size=float(DimBoard), actor_radius=Ghost.NAV_RADIUS, step=Ghost.NAV_STEP)
 ghost_house_exit = (200.0, 150.0)
+# Todos arrancan dentro de la caja con delays más largos; el rojo es el primero en salir.
+# Posiciones alineadas a la red del grafo (offset 2, paso 4) y centradas dentro de la caja walkable.
+_ghost_stagger = (3000, 6000, 9000, 12000)
 ghosts = [
-    Ghost(matrix, MC, XPxToMC, YPxToMC, 186.0, 186.0, 180.0, "random", view_size=float(DimBoard), navigator=ghost_nav, release_delay_ms=0, house_exit_xy=ghost_house_exit),
-    Ghost(matrix, MC, XPxToMC, YPxToMC, 202.0, 186.0, 0.0, "euclid", view_size=float(DimBoard), navigator=ghost_nav, release_delay_ms=3000, house_exit_xy=ghost_house_exit),
-    Ghost(matrix, MC, XPxToMC, YPxToMC, 218.0, 186.0, 270.0, "astar_lead", view_size=float(DimBoard), navigator=ghost_nav, release_delay_ms=6000, house_exit_xy=ghost_house_exit),
-    Ghost(matrix, MC, XPxToMC, YPxToMC, 202.0, 222.0, 90.0, "astar_support", view_size=float(DimBoard), navigator=ghost_nav, release_delay_ms=9000, house_exit_xy=ghost_house_exit),
+    Ghost(matrix, MC, XPxToMC, YPxToMC, 190.0, 174.0, 180.0, "random",        view_size=float(DimBoard), navigator=ghost_nav, release_delay_ms=_ghost_stagger[0], house_exit_xy=ghost_house_exit, house_rect=ghost_house_rect),
+    Ghost(matrix, MC, XPxToMC, YPxToMC, 202.0, 174.0,   0.0, "euclid",        view_size=float(DimBoard), navigator=ghost_nav, release_delay_ms=_ghost_stagger[1], house_exit_xy=ghost_house_exit, house_rect=ghost_house_rect),
+    Ghost(matrix, MC, XPxToMC, YPxToMC, 214.0, 174.0, 270.0, "astar_lead",    view_size=float(DimBoard), navigator=ghost_nav, release_delay_ms=_ghost_stagger[2], house_exit_xy=ghost_house_exit, house_rect=ghost_house_rect),
+    Ghost(matrix, MC, XPxToMC, YPxToMC, 202.0, 186.0,  90.0, "astar_support", view_size=float(DimBoard), navigator=ghost_nav, release_delay_ms=_ghost_stagger[3], house_exit_xy=ghost_house_exit, house_rect=ghost_house_rect),
 ]
 
 
