@@ -37,7 +37,7 @@ img_ghost3 = os.path.join(BASE_PATH, 'fantasma3.bmp')
 img_ghost4 = os.path.join(BASE_PATH, 'fantasma4.bmp')
 
 
-file_csv = os.path.join(BASE_PATH, 'mapaMOD.csv')
+file_csv = os.path.join(BASE_PATH, 'mapa.csv')
 matrix = np.array(pd.io.parsers.read_csv(file_csv, header=None)).astype("int")
 
 #Matriz de Control para mapeo entre pixeles <-> coord donde se localizan esquinas
