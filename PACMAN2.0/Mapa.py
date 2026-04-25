@@ -11,51 +11,32 @@ Direccion = Tuple[int, int]
 
 
 class Mapa:
-    """Grafo navegable del laberinto Pacman.
-
-    Atributos publicos:
-        filas, columnas        : tamano de la rejilla logica.
-        escala                 : pixeles del BMP por celda.
-        ancho_vista, alto_vista: tamano del area de dibujo en coordenadas
-                                 OpenGL (ya transformadas al mismo cuadro
-                                 donde se dibuja la textura del mapa).
-        ancho_bmp, alto_bmp    : tamano original del BMP en pixeles.
-    """
-
-    # Color de las paredes en mapa.bmp (laberinto clasico de Pacman).
     _COLOR_PARED = (33, 33, 222)
-    # Ajuste fino del grafo para evitar caminos falsos en esquinas.
     UMBRAL_CELDA_TRANSITABLE = 0.92
     RADIO_SEGURIDAD_ESQUINA = 1
-    # Zona de spawn/caja de fantasmas en este mapa (nodos de la rejilla).
     _FILAS_CAJA_FANTASMAS = (13, 14, 15)
     _COLUMNAS_CAJA_FANTASMAS = (11, 12, 13, 14, 15, 16)
-    # Puerta interna de la caja (parte superior interior).
     _PUERTA_INTERIOR_CAJA = ((13, 13), (13, 14))
-    # Salida exterior inmediata de la puerta.
     _PUERTA_EXTERIOR_CAJA = ((12, 13), (12, 14))
-    # Bloqueos manuales para pruebas de jugabilidad/debug del grafo.
-    # Formato: (fila, columna)
     NODOS_BLOQUEADOS_MANUALES = {
-        (28, 2), (28, 11), (28, 13), (28, 14), (28, 16), (28, 25), 
-        (27, 2), (27, 11), (27, 13), (27, 14), (27, 16), (27, 25), 
-        (25, 2), (25, 4), (25, 5), (25, 10), (25, 17), (25, 22), (25, 23), (25,25),
+        (28, 2), (28, 11), (28, 13), (28, 14), (28, 16), (28, 25),
+        (27, 2), (27, 11), (27, 13), (27, 14), (27, 16), (27, 25),
+        (25, 2), (25, 4), (25, 5), (25, 10), (25, 17), (25, 22), (25, 23), (25, 25),
         (24, 2), (24, 7), (24, 8), (24, 10), (24, 17), (24, 19), (24, 20), (24, 25),
-        (22, 2), (22, 11), (22, 13), (22, 14), (22, 16), (22, 20), (22, 25), 
+        (22, 2), (22, 11), (22, 13), (22, 14), (22, 16), (22, 20), (22, 25),
         (21, 2), (21, 5), (21, 7), (21, 11), (21, 16), (21, 20), (21, 22), (21, 25),
-        (19, 5), (19, 7), (19, 8), (19, 10), (19, 17), (19, 19), (19, 20),(19, 22),
-        (18, 10), (18, 17), 
-        (16, 10), (16, 17), 
-        (15, 5), (15, 7), (15, 8), (15, 19), (15, 20), (15, 22), 
-        (13, 5), (13, 7), (13, 8), (13, 19), (13, 20), (13, 22), 
-        (12, 10), (12, 17), 
-        (10, 11), (10, 13), (10, 14), (10, 16), 
+        (19, 5), (19, 7), (19, 8), (19, 10), (19, 17), (19, 19), (19, 20), (19, 22),
+        (18, 10), (18, 17),
+        (16, 10), (16, 17),
+        (15, 5), (15, 7), (15, 8), (15, 19), (15, 20), (15, 22),
+        (13, 5), (13, 7), (13, 8), (13, 19), (13, 20), (13, 22),
+        (12, 10), (12, 17),
+        (10, 11), (10, 13), (10, 14), (10, 16),
         (9, 5), (9, 11), (9, 16), (9, 22),
-        (7, 2), (7, 5), (7, 10), (7, 17), (7, 22), (7, 25), 
+        (7, 2), (7, 5), (7, 10), (7, 17), (7, 22), (7, 25),
         (6, 2), (6, 5), (6, 7), (6, 8), (6, 10), (6, 17), (6, 19), (6, 20), (6, 22), (6, 25),
         (4, 2), (4, 5), (4, 7), (4, 11), (4, 13), (4, 14), (4, 16), (4, 20), (4, 22), (4, 25),
         (2, 2), (2, 5), (2, 7), (2, 11), (2, 16), (2, 20), (2, 22), (2, 25),
-
     }
 
     def __init__(
@@ -75,41 +56,25 @@ class Mapa:
         self.columnas = ancho_bmp // self.escala
         self.filas = alto_bmp // self.escala
 
-        # Si no se especifica alto, se respeta el aspecto del BMP para
-        # que las celdas queden cuadradas en pantalla.
         self.ancho_vista = float(ancho_vista)
         if alto_vista is None:
             self.alto_vista = float(ancho_vista) * (alto_bmp / ancho_bmp)
         else:
             self.alto_vista = float(alto_vista)
 
-        # 1) Mascara binaria: True = pixel transitable (no es pared).
         self._caminable = [[False] * ancho_bmp for _ in range(alto_bmp)]
         for y in range(alto_bmp):
             fila_pix = self._caminable[y]
             for x in range(ancho_bmp):
                 fila_pix[x] = pixeles[x, y] != self._COLOR_PARED
 
-        # 2) BFS para conservar solo el corredor principal del laberinto.
         self._corredor = self._aislar_corredor_principal()
 
-        # 3) Construccion de nodos transitables y adyacencias.
         self._adyacencia: dict = {}
         self._construir_grafo()
 
-    # ------------------------------------------------------------------
-    # Construccion del grafo
-    # ------------------------------------------------------------------
     def _aislar_corredor_principal(self) -> List[List[bool]]:
-        """Devuelve una mascara con SOLO los pixeles que pertenecen al
-        corredor jugable, descartando los interiores huecos de las
-        paredes.
-
-        Empieza el BFS desde el pixel transitable mas cercano al centro
-        del bitmap, lo que en cualquier laberinto Pacman cae dentro de
-        la zona principal."""
         ancho, alto = self.ancho_bmp, self.alto_bmp
-        # Buscar un pixel inicial caminable cercano al centro
         cy, cx = alto // 2, ancho // 2
         inicio = None
         for radio in range(0, max(ancho, alto)):
@@ -145,15 +110,12 @@ class Mapa:
         return corredor
 
     def _pixel_central(self, fila: int, columna: int) -> Tuple[int, int]:
-        """Coordenadas (px_y, px_x) del centro de una celda en el BMP."""
         return (
             fila * self.escala + self.escala // 2,
             columna * self.escala + self.escala // 2,
         )
 
     def _celda_transitable(self, fila: int, columna: int) -> bool:
-        """Una celda es transitable cuando una pequena ventana centrada
-        en ella esta mayoritariamente dentro del corredor real."""
         if not (0 <= fila < self.filas and 0 <= columna < self.columnas):
             return False
         cy, cx = self._pixel_central(fila, columna)
@@ -169,8 +131,6 @@ class Mapa:
         return total > 0 and validos / total > 0.7
 
     def _segmento_libre(self, n1: Nodo, n2: Nodo) -> bool:
-        """Comprueba que la linea recta entre los centros de n1 y n2
-        este enteramente dentro del corredor."""
         y1, x1 = self._pixel_central(*n1)
         y2, x2 = self._pixel_central(*n2)
         pasos = max(abs(y2 - y1), abs(x2 - x1))
@@ -202,20 +162,13 @@ class Mapa:
                 if vecino in self._adyacencia and self._segmento_libre((fila, col), vecino):
                     self._adyacencia[(fila, col)].append(vecino)
 
-    # ------------------------------------------------------------------
-    # Coordenadas
-    # ------------------------------------------------------------------
     def posicion(self, nodo: Nodo) -> Tuple[float, float]:
-        """Convierte un nodo (fila, columna) a coordenadas OpenGL del
-        cuadro donde se dibuja la textura del mapa."""
         fila, col = nodo
         cx = (col + 0.5) * self.ancho_vista / self.columnas
         cy = (fila + 0.5) * self.alto_vista / self.filas
         return cx, cy
 
     def nodo_mas_cercano(self, x: float, y: float) -> Optional[Nodo]:
-        """Devuelve el nodo transitable mas cercano a un punto en
-        coordenadas OpenGL. Util para corregir posiciones de spawn."""
         if not self._adyacencia:
             return None
         mejor = None
@@ -228,9 +181,6 @@ class Mapa:
                 mejor = nodo
         return mejor
 
-    # ------------------------------------------------------------------
-    # API consultada por Pacman y Ghost
-    # ------------------------------------------------------------------
     def es_transitable(self, nodo: Nodo) -> bool:
         return nodo in self._adyacencia
 
@@ -238,23 +188,12 @@ class Mapa:
         return list(self._adyacencia.get(nodo, ()))
 
     def direccion_entre(self, n1: Nodo, n2: Nodo) -> Direccion:
-        """Devuelve la direccion unitaria (dx, dy) que va de n1 a n2.
-
-        Convencion del proyecto (compatible con OpenGL del juego, donde
-        y crece hacia abajo en pantalla):
-            (1, 0)  -> derecha       (col + 1)
-            (-1, 0) -> izquierda     (col - 1)
-            (0, 1)  -> abajo         (fila + 1)
-            (0, -1) -> arriba        (fila - 1)
-        """
         df = n2[0] - n1[0]
         dc = n2[1] - n1[1]
         return (1 if dc > 0 else -1 if dc < 0 else 0,
                 1 if df > 0 else -1 if df < 0 else 0)
 
     def vecino_en_direccion(self, nodo: Nodo, direccion: Direccion) -> Optional[Nodo]:
-        """Devuelve el vecino al que se llega siguiendo `direccion` o
-        None si no hay paso valido. La direccion (0, 0) nunca es valida."""
         if direccion == (0, 0):
             return None
         candidato = (nodo[0] + direccion[1], nodo[1] + direccion[0])
@@ -265,16 +204,6 @@ class Mapa:
     def es_interseccion(
         self, nodo: Nodo, direccion_actual: Optional[Direccion] = None
     ) -> bool:
-        """Implementa la definicion de la rubrica:
-
-            "Celda con mas de una opcion valida excluyendo la direccion
-             contraria"
-
-        Si se conoce la direccion actual, se cuentan los vecinos cuyas
-        direcciones difieran de la contraria. Si todavia no hay direccion
-        (primer movimiento), se requieren al menos 3 vecinos para que
-        cualquier orientacion deje al menos 2 alternativas.
-        """
         opciones = self.vecinos(nodo)
         if not opciones:
             return False
@@ -288,7 +217,6 @@ class Mapa:
         return no_opuestas >= 2
 
     def es_nodo_caja_fantasmas(self, nodo: Nodo) -> bool:
-        """Indica si un nodo pertenece al interior de la caja de fantasmas."""
         fila, col = nodo
         return (
             fila in self._FILAS_CAJA_FANTASMAS
@@ -302,9 +230,6 @@ class Mapa:
     def es_puerta_exterior_caja_fantasmas(self, nodo: Nodo) -> bool:
         return nodo in self._PUERTA_EXTERIOR_CAJA
 
-    # ------------------------------------------------------------------
-    # Iterables convenientes
-    # ------------------------------------------------------------------
     def iterar_nodos(self) -> Iterable[Nodo]:
         return self._adyacencia.keys()
 

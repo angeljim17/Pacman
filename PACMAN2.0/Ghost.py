@@ -1,28 +1,3 @@
-"""
-Ghost.py
---------
-Fantasmas con cuatro comportamientos de IA. Todos comparten la misma
-mecanica de movimiento (alineado al grid, velocidad constante, sin
-vibraciones) y solo difieren en la politica de decision aplicada al
-llegar a una interseccion.
-
-Comportamientos disponibles:
-  - "aleatorio"    : eleccion aleatoria entre opciones validas
-                     (excluye la direccion contraria).
-  - "euclides"     : minimiza la distancia euclidiana a Pacman.
-  - "cooperativo_1": A* hacia un punto adelantado de Pacman.
-  - "cooperativo_2": A* hacia un punto de intercepcion distinto al
-                     del fantasma cooperativo_1, evitando duplicar la
-                     ruta del companero para encerrar a Pacman.
-
-Reglas (rubrica):
-  - Movimiento continuo sin pausas.
-  - No retroceder salvo que no exista otra alternativa.
-  - Sin vibraciones ni loops cortos: las decisiones solo ocurren al
-    centro de cada celda y nunca se replanea a mitad de un tramo.
-  - Algoritmo A* con nombres claros en espanol y heuristica Manhattan.
-"""
-
 import heapq
 import math
 import random
@@ -45,22 +20,6 @@ from OpenGL.GL import (
 
 
 def a_estrella(mapa, inicio, meta, nodos_evitar=None, penalizacion=4):
-    """Algoritmo A* sobre la rejilla del laberinto.
-
-    Devuelve el camino (lista de nodos sucesores, sin incluir el inicio)
-    desde `inicio` hasta `meta`. Si no hay ruta posible regresa una
-    lista vacia.
-
-    Variables siguen los nombres de la rubrica:
-      - nodos_abiertos : cola de prioridad (heap) por costo total f.
-      - nodos_cerrados : conjunto de nodos ya expandidos.
-      - costo_acumulado: g(n), costo desde el inicio.
-      - heuristica     : h(n), distancia Manhattan en el grid.
-      - camino_resultante: secuencia reconstruida.
-
-    Explora siempre al menos un nivel de decision; el bucle puede
-    expandir muchos nodos antes de encontrar la meta (depth >= 2 en
-    laberintos no triviales)."""
     if inicio is None or meta is None or inicio == meta:
         return []
 
@@ -104,8 +63,6 @@ def a_estrella(mapa, inicio, meta, nodos_evitar=None, penalizacion=4):
 
 
 class Ghost:
-    """Fantasma generico parametrizado por su comportamiento."""
-
     LADO_SPRITE = 6.5
 
     def __init__(
@@ -139,17 +96,12 @@ class Ghost:
 
         self.aleatorizador = random.Random(semilla)
 
-        # Tiempo de espera antes de empezar a moverse: permite que los
-        # fantasmas salgan de la caja escalonados (uno por uno) en lugar
-        # de abandonar el spawn al mismo tiempo.
         self.frames_espera = max(0, int(frames_espera))
-        # Bandera para impedir que, una vez afuera, vuelvan a meterse a la caja.
         self.salio_de_caja = False
 
         self.texturas = None
         self.id_textura = None
 
-    # --- compatibilidad con la interfaz original ---
     def loadTextures(self, texturas, id_textura):
         self.cargar_texturas(texturas, id_textura)
 
@@ -161,7 +113,6 @@ class Ghost:
     def position(self):
         return (self.px, self.py)
 
-    # --- utilitarios ---
     def _angulo_direccion(self, direccion):
         dx, dy = direccion
         if dx == 1:
@@ -175,13 +126,8 @@ class Ghost:
         return self.angulo
 
     def _opciones_validas(self):
-        """Vecinos del nodo actual sin la direccion contraria.
-
-        Si solo existe la direccion contraria (callejon real) se admite
-        para que el fantasma jamas se detenga."""
         opciones = self.mapa.vecinos(self.nodo_actual)
         if self.salio_de_caja:
-            # Evita reingreso a la caja una vez que el fantasma ya salio.
             opciones = [v for v in opciones if not self.mapa.es_nodo_caja_fantasmas(v)]
         if not opciones:
             return []
@@ -194,7 +140,6 @@ class Ghost:
         ]
         return sin_reversa or opciones
 
-    # --- politicas de decision por tipo de fantasma ---
     def _decidir_aleatorio(self):
         opciones = self._opciones_validas()
         if not opciones:
@@ -213,8 +158,6 @@ class Ghost:
         return min(opciones, key=distancia_objetivo)
 
     def _meta_lider(self, pacman):
-        """Punto de intercepcion para el fantasma cooperativo lider:
-        unas celdas adelante de Pacman, en su direccion actual."""
         adelantamiento = 3
         dx, dy = pacman.direccion_actual if pacman.direccion_actual != (0, 0) else (1, 0)
         objetivo = (
@@ -226,9 +169,6 @@ class Ghost:
         return pacman.nodo_actual
 
     def _meta_soporte(self, pacman, fantasmas):
-        """Punto de intercepcion del cooperativo soporte: punto reflejado
-        respecto a la posicion adelantada del lider, lo que tiende a
-        cerrar a Pacman desde el lado contrario."""
         lider = next((f for f in fantasmas if f.tipo == "cooperativo_1"), None)
         adelantamiento = 2
         dx, dy = pacman.direccion_actual if pacman.direccion_actual != (0, 0) else (-1, 0)
@@ -268,7 +208,6 @@ class Ghost:
         if not ruta:
             return None
         siguiente = ruta[0]
-        # No invertir hacia el nodo del que se viene salvo emergencia
         if siguiente == self.nodo_anterior:
             opciones = self._opciones_validas()
             for opcion in opciones:
@@ -288,24 +227,17 @@ class Ghost:
         return self._decidir_aleatorio()
 
     def _decidir_salida_caja(self):
-        """Fuerza la salida del fantasma cuando esta en la caja.
-
-        Prioridad:
-          1) Ir a la puerta interior (13,13) o (13,14).
-          2) Cruzar la puerta hacia afuera (12,13) o (12,14).
-          3) Si algo falla, usar A* hacia la salida exterior mas cercana.
-        """
-        # Ya fuera: no aplica logica de salida.
         if not self.mapa.es_nodo_caja_fantasmas(self.nodo_actual):
             return None
 
-        # Si estamos sobre la puerta interior, salir directo al exterior.
         if self.mapa.es_puerta_interior_caja_fantasmas(self.nodo_actual):
-            for destino in ((12, 13), (12, 14)):
-                if destino in self.mapa.vecinos(self.nodo_actual):
-                    return destino
+            destinos = [
+                d for d in ((12, 13), (12, 14))
+                if d in self.mapa.vecinos(self.nodo_actual)
+            ]
+            if destinos:
+                return self.aleatorizador.choice(destinos)
 
-        # Si estamos dentro de caja (no en puerta), acercarnos a puerta interior.
         metas_interiores = ((13, 13), (13, 14))
         rutas = []
         for meta in metas_interiores:
@@ -313,11 +245,12 @@ class Ghost:
             if ruta:
                 rutas.append(ruta)
         if rutas:
-            mejor = min(rutas, key=len)
+            mejor_longitud = min(len(ruta) for ruta in rutas)
+            candidatas = [ruta for ruta in rutas if len(ruta) == mejor_longitud]
+            mejor = self.aleatorizador.choice(candidatas)
             self.camino_resultante = mejor
             return mejor[0]
 
-        # Fallback robusto: intentar salida exterior directa.
         metas_exteriores = ((12, 13), (12, 14))
         rutas = []
         for meta in metas_exteriores:
@@ -325,27 +258,22 @@ class Ghost:
             if ruta:
                 rutas.append(ruta)
         if rutas:
-            mejor = min(rutas, key=len)
+            mejor_longitud = min(len(ruta) for ruta in rutas)
+            candidatas = [ruta for ruta in rutas if len(ruta) == mejor_longitud]
+            mejor = self.aleatorizador.choice(candidatas)
             self.camino_resultante = mejor
             return mejor[0]
         return None
 
     def _actualizar_estado_salida_caja(self):
-        """Marca la salida definitiva cuando el fantasma pisa la puerta exterior."""
         if self.mapa.es_puerta_exterior_caja_fantasmas(self.nodo_actual):
             self.salio_de_caja = True
 
     def _elegir_objetivo(self, pacman, fantasmas):
-        """Selecciona el siguiente nodo segun el comportamiento del
-        fantasma. En pasillos rectos no toma decisiones nuevas para
-        mantener trayectoria estable: simplemente sigue de largo."""
         opciones = self.mapa.vecinos(self.nodo_actual)
         if not opciones:
             return
 
-        # Prioridad total: al salir del spawn, primero abandonar la caja.
-        # Evita que algunos tipos de IA (p. ej. aleatorio/euclides) se
-        # queden oscilando dentro sin tomar la puerta correcta.
         salida_forzada = self._decidir_salida_caja()
         if salida_forzada is not None:
             self.nodo_objetivo = salida_forzada
@@ -355,7 +283,6 @@ class Ghost:
             self.angulo = self._angulo_direccion(self.direccion_actual)
             return
 
-        # Pasillo recto: continuar en la direccion actual sin redecidir
         if (
             self.direccion_actual != (0, 0)
             and not self.mapa.es_interseccion(self.nodo_actual, self.direccion_actual)
@@ -367,10 +294,8 @@ class Ghost:
                 self.nodo_objetivo = siguiente
                 return
 
-        # Interseccion (o primer movimiento): consultar la IA del fantasma
         siguiente = self._decidir(pacman, fantasmas)
         if siguiente is None:
-            # Fallback: cualquier opcion valida sin reversa
             validas = self._opciones_validas()
             siguiente = validas[0] if validas else opciones[0]
 
@@ -379,12 +304,6 @@ class Ghost:
         self.angulo = self._angulo_direccion(self.direccion_actual)
 
     def actualizar(self, pacman, fantasmas=None):
-        """Avanza un frame: garantiza movimiento continuo y decisiones
-        unicamente cuando se llega exactamente al centro del nodo.
-
-        Mientras `frames_espera > 0` el fantasma permanece quieto en el
-        spawn (caja central). Asi se logra que los fantasmas salgan de
-        la caja escalonadamente, uno por uno."""
         fantasmas = fantasmas or []
 
         if self.frames_espera > 0:
@@ -409,11 +328,9 @@ class Ghost:
             self.px += self.velocidad * dx / distancia
             self.py += self.velocidad * dy / distancia
 
-    # --- compatibilidad con interfaz original ---
     def update2(self, pacman, fantasmas=None):
         self.actualizar(pacman, fantasmas)
 
-    # --- renderizado ---
     def _dibujar_sprite(self):
         s = self.lado_sprite
         glPushMatrix()

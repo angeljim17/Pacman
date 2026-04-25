@@ -1,20 +1,3 @@
-"""
-Pacman.py
----------
-Personaje controlado por el jugador. Movimiento estrictamente alineado
-al grid del laberinto: avanza con velocidad constante entre centros de
-celda y solo decide en intersecciones.
-
-Reglas (rubrica):
-  - Sin movimientos diagonales.
-  - Cambio de direccion solo en intersecciones (con bufer de entrada
-    para mantener control responsivo sin retraso).
-  - Persistencia de la direccion hasta la siguiente decision valida.
-  - Nunca atraviesa obstaculos: las direcciones invalidas se ignoran.
-  - El juego nunca termina y la entidad nunca se queda detenida si hay
-    al menos un vecino disponible.
-"""
-
 import math
 
 import pygame
@@ -39,8 +22,6 @@ from OpenGL.GL import (
 
 
 class Pacman:
-    """Pacman controlado por teclado, alineado al grid del laberinto."""
-
     LADO_SPRITE = 5.5
 
     def __init__(self, mapa, fila_inicial, col_inicial, velocidad=2.0, lado_sprite=None):
@@ -64,7 +45,6 @@ class Pacman:
         self.texturas = None
         self.id_textura = None
 
-    # --- compatibilidad con la interfaz original ---
     def loadTextures(self, texturas, id_textura):
         self.cargar_texturas(texturas, id_textura)
 
@@ -74,10 +54,8 @@ class Pacman:
 
     @property
     def position(self):
-        """Posicion actual en coordenadas OpenGL (compatibilidad)."""
         return (self.px, self.py)
 
-    # --- logica de movimiento ---
     def _angulo_direccion(self, direccion):
         dx, dy = direccion
         if dx == 1:
@@ -91,12 +69,6 @@ class Pacman:
         return self.angulo
 
     def _leer_entrada(self, teclas):
-        """Lee SOLO el estado fisico actual de las flechas del teclado.
-
-        Si no hay flecha presionada, la direccion solicitada se limpia
-        a (0, 0) para que Pacman se detenga al llegar al siguiente nodo.
-        Esto garantiza que el personaje solo se mueva mientras el
-        jugador mantenga pulsada una flecha (control directo)."""
         if teclas[K_RIGHT]:
             self.direccion_solicitada = (1, 0)
         elif teclas[K_LEFT]:
@@ -109,14 +81,6 @@ class Pacman:
             self.direccion_solicitada = (0, 0)
 
     def _elegir_objetivo(self):
-        """Politica de eleccion: control DIRECTO con las flechas fisicas.
-
-        Pacman solo avanza mientras el jugador mantenga presionada una
-        flecha en una direccion valida. Si la flecha apunta a una pared,
-        o si no hay flecha pulsada, se queda parado en el nodo actual.
-        No hay buffer ni continuacion automatica: el movimiento depende
-        exclusivamente del input fisico del momento.
-        """
         nodo = self.nodo_actual
         candidato = self.mapa.vecino_en_direccion(nodo, self.direccion_solicitada)
         if candidato is not None and not self.mapa.es_nodo_caja_fantasmas(candidato):
@@ -129,12 +93,6 @@ class Pacman:
         self.direccion_actual = (0, 0)
 
     def actualizar(self, teclas):
-        """Avanza un frame con velocidad constante.
-
-        Garantiza ejecucion fluida (sin pausas) y evita vibraciones:
-        las decisiones solo se toman cuando se llega exactamente al
-        centro del nodo actual, y la posicion se ajusta al centro al
-        cruzar el umbral de la velocidad."""
         self._leer_entrada(teclas)
 
         if self.nodo_objetivo == self.nodo_actual:
@@ -149,17 +107,14 @@ class Pacman:
             self.px, self.py = objetivo_x, objetivo_y
             self.nodo_anterior = self.nodo_actual
             self.nodo_actual = self.nodo_objetivo
-            # Encadenar nueva decision en el mismo frame para no detenerse
             self._elegir_objetivo()
         else:
             self.px += self.velocidad * dx / distancia
             self.py += self.velocidad * dy / distancia
 
-    # --- compatibilidad con interfaz original ---
     def update(self, teclas):
         self.actualizar(teclas)
 
-    # --- renderizado ---
     def _dibujar_sprite(self):
         s = self.lado_sprite
         glPushMatrix()

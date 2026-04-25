@@ -48,10 +48,8 @@ from Pacman import Pacman
 from Ghost import Ghost
 
 
-# --- parametros globales ---
-DIM_TABLERO = 400  # lado horizontal del area de juego en coords OpenGL.
+DIM_TABLERO = 400
 
-# --- carga de archivos ---
 RUTA_BASE = os.path.abspath(os.path.dirname(__file__))
 archivo_mapa_textura = os.path.join(RUTA_BASE, "mapa.bmp")
 archivo_pacman = os.path.join(RUTA_BASE, "pacman.bmp")
@@ -60,24 +58,14 @@ archivo_fantasma_2 = os.path.join(RUTA_BASE, "fantasma2.bmp")
 archivo_fantasma_3 = os.path.join(RUTA_BASE, "fantasma3.bmp")
 archivo_fantasma_4 = os.path.join(RUTA_BASE, "fantasma4.bmp")
 
-# Construccion del grafo navegable a partir del BMP. Detecta dinamicamente
-# las celdas transitables y la conectividad real (no asume codigos).
 mapa_juego = Mapa(archivo_mapa_textura, ancho_vista=DIM_TABLERO)
 
-# Alto efectivo del tablero respetando el aspecto del BMP.
 ALTO_TABLERO = mapa_juego.alto_vista
 
-# Ajuste fino visual anti-"comer pared":
-# - MARGEN_PIXELES_MURO sube => sprites mas pequenos (menos clipping visual).
-# - MARGEN_PIXELES_MURO baja => sprites mas grandes.
-# Recomendado: entre 1.4 y 2.2 para este mapa.
 ANCHO_CELDA_VISTA = DIM_TABLERO / mapa_juego.columnas
 MARGEN_PIXELES_MURO = 1.8
 LADO_SPRITE_ENTIDADES = max(3.8, ANCHO_CELDA_VISTA * 0.5 - MARGEN_PIXELES_MURO)
 
-# --- entidades ---
-# Pacman empieza justo debajo de la caja central de fantasmas
-# (en el corredor que esta directamente bajo la puerta de la caja).
 pacman = Pacman(
     mapa_juego,
     fila_inicial=17,
@@ -86,14 +74,10 @@ pacman = Pacman(
     lado_sprite=LADO_SPRITE_ENTIDADES,
 )
 
-# Los cuatro fantasmas spawnean DENTRO de la caja de fantasmas
-# (filas 13-15, cols 11-16). Salen escalonadamente uno por uno con
-# un intervalo de 5 segundos entre cada uno: el primero sale de
-# inmediato y los demas esperan 5, 10 y 15 segundos respectivamente.
-INTERVALO_SALIDA = 300  # frames a 60 fps = 5 s entre fantasmas
+INTERVALO_SALIDA = 300
 fantasmas = [
     Ghost(mapa_juego, 14, 12, tipo="aleatorio",
-          velocidad=1.7, semilla=11, frames_espera=0 * INTERVALO_SALIDA,
+          velocidad=1.7, frames_espera=0 * INTERVALO_SALIDA,
           lado_sprite=LADO_SPRITE_ENTIDADES),
     Ghost(mapa_juego, 14, 13, tipo="euclides",
           velocidad=1.7, frames_espera=1 * INTERVALO_SALIDA,
@@ -106,7 +90,6 @@ fantasmas = [
           lado_sprite=LADO_SPRITE_ENTIDADES),
 ]
 
-# --- inicializacion grafica ---
 texturas = []
 
 
@@ -178,7 +161,6 @@ def dibujar_escena():
         fantasma.dibujar()
 
 
-# --- bucle principal ---
 pygame.init()
 inicializar()
 
@@ -194,8 +176,6 @@ while not terminado:
 
     teclas = pygame.key.get_pressed()
 
-    # Logica del juego: Pacman y fantasmas avanzan con velocidad constante.
-    # Las colisiones no reinician nada y el juego nunca termina.
     pacman.actualizar(teclas)
     for fantasma in fantasmas:
         fantasma.actualizar(pacman, fantasmas)
