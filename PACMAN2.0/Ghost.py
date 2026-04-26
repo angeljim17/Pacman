@@ -187,21 +187,158 @@ class Ghost:
             return objetivo
         return self.mapa.nodo_mas_cercano(*self.mapa.posicion(adelante_pacman))
 
+    def _intersecciones_futuras_companero(self, companero, max_intersecciones=3):
+        if companero is None:
+            return []
+
+        ruta_base = []
+        if companero.nodo_objetivo and companero.nodo_objetivo != companero.nodo_actual:
+            ruta_base.append(companero.nodo_objetivo)
+        ruta_base.extend(companero.camino_resultante)
+
+        ruta_ordenada = []
+        vistos = set()
+        for nodo in ruta_base:
+            if nodo in vistos:
+                continue
+            vistos.add(nodo)
+            ruta_ordenada.append(nodo)
+
+        intersecciones = []
+        previo = companero.nodo_actual
+        direccion = companero.direccion_actual
+        for nodo in ruta_ordenada:
+            if direccion == (0, 0):
+                direccion = self.mapa.direccion_entre(previo, nodo)
+            if self.mapa.es_interseccion(nodo, direccion):
+                intersecciones.append(nodo)
+                if len(intersecciones) >= max_intersecciones:
+                    break
+            direccion = self.mapa.direccion_entre(previo, nodo)
+            previo = nodo
+
+        return intersecciones
+
+    def _siguiente_interseccion_en_ruta(self, origen, direccion_inicial, ruta):
+        if not ruta:
+            return None
+        previo = origen
+        direccion = direccion_inicial
+        for nodo in ruta:
+            if direccion == (0, 0):
+                direccion = self.mapa.direccion_entre(previo, nodo)
+            if self.mapa.es_interseccion(nodo, direccion):
+                return nodo
+            direccion = self.mapa.direccion_entre(previo, nodo)
+            previo = nodo
+        return None
+
+    def _siguiente_interseccion_por_rama(self, inicio, direccion, limite=10):
+        actual = inicio
+        direccion_actual = direccion
+        pasos = 0
+        while pasos < limite:
+            siguiente = self.mapa.vecino_en_direccion(actual, direccion_actual)
+            if siguiente is None:
+                return None
+            if self.mapa.es_interseccion(siguiente, direccion_actual):
+                return siguiente
+            opciones = self.mapa.vecinos(siguiente)
+            if not opciones:
+                return None
+            opuesta = (-direccion_actual[0], -direccion_actual[1])
+            candidatas = [
+                n for n in opciones
+                if self.mapa.direccion_entre(siguiente, n) != opuesta
+            ]
+            if not candidatas:
+                return None
+            if len(candidatas) > 1:
+                return siguiente
+            direccion_actual = self.mapa.direccion_entre(siguiente, candidatas[0])
+            actual = siguiente
+            pasos += 1
+        return None
+
+    def _candidatas_interseccion(self, fantasma, meta_base):
+        ruta_base = a_estrella(self.mapa, fantasma.nodo_actual, meta_base)
+        primera = self._siguiente_interseccion_en_ruta(
+            fantasma.nodo_actual, fantasma.direccion_actual, ruta_base
+        )
+        if primera is None:
+            return [meta_base]
+
+        candidatas = [primera]
+        opciones = self.mapa.vecinos(primera)
+        for vecino in opciones:
+            direccion = self.mapa.direccion_entre(primera, vecino)
+            if fantasma.direccion_actual != (0, 0) and direccion == (
+                -fantasma.direccion_actual[0], -fantasma.direccion_actual[1]
+            ):
+                continue
+            futura = self._siguiente_interseccion_por_rama(primera, direccion, limite=12)
+            if futura is not None and futura not in candidatas:
+                candidatas.append(futura)
+        return candidatas[:4]
+
+    def _evaluar_par_cooperativo(self, nodo_lider, nodo_soporte, pacman):
+        if nodo_lider is None or nodo_soporte is None:
+            return -math.inf
+        d_lider = abs(nodo_lider[0] - pacman.nodo_actual[0]) + abs(nodo_lider[1] - pacman.nodo_actual[1])
+        d_soporte = abs(nodo_soporte[0] - pacman.nodo_actual[0]) + abs(nodo_soporte[1] - pacman.nodo_actual[1])
+        separacion = abs(nodo_lider[0] - nodo_soporte[0]) + abs(nodo_lider[1] - nodo_soporte[1])
+        balance = abs(d_lider - d_soporte)
+        return -(d_lider + d_soporte) + 0.8 * separacion - 0.4 * balance
+
+    #FUNCION: evaluacion cooperativa de combinaciones
+    def _seleccionar_objetivos_cooperativos(self, pacman, fantasmas):
+        lider = next((f for f in fantasmas if f.tipo == "cooperativo_1"), None)
+        soporte = next((f for f in fantasmas if f.tipo == "cooperativo_2"), None)
+        if lider is None or soporte is None:
+            return {}
+
+        meta_lider_base = lider._meta_lider(pacman)
+        meta_soporte_base = soporte._meta_soporte(pacman, fantasmas)
+        candidatas_lider = lider._candidatas_interseccion(lider, meta_lider_base)
+        candidatas_soporte = soporte._candidatas_interseccion(soporte, meta_soporte_base)
+
+        mejor_par = (meta_lider_base, meta_soporte_base)
+        mejor_puntaje = -math.inf
+        for nodo_lider in candidatas_lider:
+            for nodo_soporte in candidatas_soporte:
+                puntaje = self._evaluar_par_cooperativo(nodo_lider, nodo_soporte, pacman)
+                if puntaje > mejor_puntaje:
+                    mejor_puntaje = puntaje
+                    mejor_par = (nodo_lider, nodo_soporte)
+
+        return {
+            "cooperativo_1": mejor_par[0],
+            "cooperativo_2": mejor_par[1],
+        }
+
     def _decidir_cooperativo(self, pacman, fantasmas, lider):
+        tipo_companero = "cooperativo_2" if lider else "cooperativo_1"
+        companero = next((f for f in fantasmas if f.tipo == tipo_companero), None)
+        nodos_evitar = self._intersecciones_futuras_companero(companero)
+        objetivos = self._seleccionar_objetivos_cooperativos(pacman, fantasmas)
+
         if lider:
-            meta = self._meta_lider(pacman)
-            ruta = a_estrella(self.mapa, self.nodo_actual, meta)
+            meta = objetivos.get("cooperativo_1", self._meta_lider(pacman))
+            ruta = a_estrella(
+                self.mapa, self.nodo_actual, meta,
+                nodos_evitar=nodos_evitar, penalizacion=2,
+            )
         else:
-            meta = self._meta_soporte(pacman, fantasmas)
+            meta = objetivos.get("cooperativo_2", self._meta_soporte(pacman, fantasmas))
             ruta_lider_otros = []
-            companero = next((f for f in fantasmas if f.tipo == "cooperativo_1"), None)
             if companero is not None:
                 ruta_lider_otros = list(companero.camino_resultante[:6])
                 if companero.nodo_objetivo:
                     ruta_lider_otros.append(companero.nodo_objetivo)
+            nodos_evitar = list(dict.fromkeys(nodos_evitar + ruta_lider_otros))
             ruta = a_estrella(
                 self.mapa, self.nodo_actual, meta,
-                nodos_evitar=ruta_lider_otros, penalizacion=3,
+                nodos_evitar=nodos_evitar, penalizacion=3,
             )
 
         self.camino_resultante = ruta
